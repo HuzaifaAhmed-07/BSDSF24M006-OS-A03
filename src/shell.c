@@ -1,24 +1,5 @@
 #include "shell.h"
 
-char* read_cmd(char* prompt, FILE* fp) {
-    printf("%s", prompt);
-    char* cmdline = (char*) malloc(sizeof(char) * MAX_LEN);
-    int c, pos = 0;
-
-    while ((c = getc(fp)) != EOF) {
-        if (c == '\n') break;
-        cmdline[pos++] = c;
-    }
-
-    if (c == EOF && pos == 0) {
-        free(cmdline);
-        return NULL; // Handle Ctrl+D
-    }
-    
-    cmdline[pos] = '\0';
-    return cmdline;
-}
-
 char** tokenize(char* cmdline) {
     // Edge case: empty command line
     if (cmdline == NULL || cmdline[0] == '\0' || cmdline[0] == '\n') {
@@ -133,4 +114,68 @@ void print_history(void) {
     for (int i = 0; i < history_count; i++) {
         printf("%4d  %s\n", i + 1, history[i]);
     }
+}
+
+/* ---------------- Tab completion (GNU Readline) ---------------- */
+
+static char* builtin_names[] = { "cd", "exit", "help", "history", "jobs", NULL };
+
+// Readline calls this again and again; each call must return ONE match,
+// and NULL when there are no more. state == 0 means "new TAB press, start over".
+static char* command_generator(const char* text, int state) {
+    static int bi;              // where we are in builtin_names
+    static char* path_copy;     // our own copy of $PATH (strtok modifies it)
+    static char* dir_name;      // the PATH directory being searched now
+    static DIR* dp;             // that directory, opened
+    static size_t len;          // length of what the user typed so far
+    struct dirent* entry;
+
+    if (state == 0) {
+        bi = 0;
+        len = strlen(text);
+        if (dp != NULL) { closedir(dp); dp = NULL; }
+        free(path_copy);
+        char* path = getenv("PATH");
+        path_copy = strdup(path ? path : "");
+        dir_name = strtok(path_copy, ":");
+        if (dir_name != NULL) dp = opendir(dir_name);
+    }
+
+    // 1) built-in commands that start with the typed text
+    while (builtin_names[bi] != NULL) {
+        char* name = builtin_names[bi++];
+        if (strncmp(name, text, len) == 0) {
+            return strdup(name);
+        }
+    }
+
+    // 2) programs in each directory listed in $PATH
+    while (dir_name != NULL) {
+        if (dp != NULL) {
+            while ((entry = readdir(dp)) != NULL) {
+                if (entry->d_name[0] != '.' && strncmp(entry->d_name, text, len) == 0) {
+                    return strdup(entry->d_name);
+                }
+            }
+            closedir(dp);
+            dp = NULL;
+        }
+        dir_name = strtok(NULL, ":");
+        if (dir_name != NULL) dp = opendir(dir_name);
+    }
+
+    return NULL;   // no more matches
+}
+
+// Readline calls this when TAB is pressed.
+// start = position in the line where the word being completed begins.
+char** shell_completion(const char* text, int start, int end) {
+    (void) end;
+    if (start == 0) {
+        // First word on the line -> it is a command name
+        return rl_completion_matches(text, command_generator);
+    }
+    // Any other word -> return NULL so Readline does its default
+    // filename completion
+    return NULL;
 }
