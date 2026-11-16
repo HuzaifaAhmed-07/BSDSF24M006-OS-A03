@@ -4,7 +4,12 @@ int main() {
     char* cmdline;
     char** arglist;
 
-    while ((cmdline = read_cmd(PROMPT, stdin)) != NULL) {
+    // Tell Readline to ask our function for matches when TAB is pressed
+    rl_attempted_completion_function = shell_completion;
+
+    // readline() prints the prompt, lets the user edit the line (arrow keys,
+    // TAB...) and returns it in malloc'd memory. It returns NULL on Ctrl+D.
+    while ((cmdline = readline(PROMPT)) != NULL) {
         // Nothing typed: do not store it, just show the prompt again
         if (cmdline[0] == '\0') {
             free(cmdline);
@@ -25,7 +30,8 @@ int main() {
             printf("%s\n", cmdline);    // show what is about to run
         }
 
-        add_to_history(cmdline);
+        add_to_history(cmdline);   // our own list: 'history' and !n
+        add_history(cmdline);      // Readline's list: Up/Down arrow keys
 
         if ((arglist = tokenize(cmdline)) != NULL) {
             // Built-ins run inside the shell itself; only fork for external commands
