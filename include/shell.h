@@ -17,14 +17,18 @@
 #define MAXARGS 64
 #define PROMPT "FCIT> "
 #define HISTORY_SIZE 20
+#define MAX_JOBS 32
 
 // Function prototypes
 char** tokenize(char* cmdline);
-int execute(char** arglist);
+int execute(char** arglist, int background);
 int handle_builtin(char** arglist);
 void add_to_history(const char* cmdline);
 char* get_history_cmd(int n);
 void print_history(void);
 char** shell_completion(const char* text, int start, int end);
+void add_job(pid_t pid, char** arglist);
+void reap_jobs(void);
+void print_jobs(void);
 
 #endif // SHELL_H

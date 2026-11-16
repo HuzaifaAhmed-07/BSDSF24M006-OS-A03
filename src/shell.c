@@ -2,7 +2,7 @@
 
 // True for characters that are a token all by themselves
 static int is_operator(char c) {
-    return c == '<' || c == '>' || c == '|';
+    return c == '<' || c == '>' || c == '|' || c == '&';
 }
 
 // Splits a command line into tokens (words).
@@ -23,7 +23,7 @@ char** tokenize(char* cmdline) {
         while (*cp == ' ' || *cp == '\t') cp++;   // skip whitespace between tokens
         if (*cp == '\0') break;
 
-        // <, > and | are tokens on their own, even with no spaces around them
+        // <, >, | and & are tokens on their own, even with no spaces around them
         if (is_operator(*cp)) {
             buf[0] = *cp++;
             buf[1] = '\0';
@@ -97,7 +97,7 @@ int handle_builtin(char** arglist) {
     }
 
     if (strcmp(arglist[0], "jobs") == 0) {
-        printf("Job control not yet implemented.\n");
+        print_jobs();
         return 1;
     }
 
@@ -197,4 +197,66 @@ char** shell_completion(const char* text, int start, int end) {
     // Any other word -> return NULL so Readline does its default
     // filename completion
     return NULL;
+}
+
+/* ---------------- Background jobs ---------------- */
+
+typedef struct {
+    pid_t pid;            // process ID of the background child
+    char cmd[MAX_LEN];    // the command text, kept only for display
+} job_t;
+
+static job_t jobs[MAX_JOBS];
+static int job_count = 0;
+
+// Remember a child that was started with & and is not being waited for
+void add_job(pid_t pid, char** arglist) {
+    if (job_count == MAX_JOBS) {
+        fprintf(stderr, "jobs: job list is full, not tracking %d\n", pid);
+        return;
+    }
+
+    job_t* job = &jobs[job_count++];
+    job->pid = pid;
+
+    // Join the words back into one string for the jobs listing
+    job->cmd[0] = '\0';
+    for (int i = 0; arglist[i] != NULL; i++) {
+        strncat(job->cmd, arglist[i], MAX_LEN - strlen(job->cmd) - 1);
+        strncat(job->cmd, " ", MAX_LEN - strlen(job->cmd) - 1);
+    }
+
+    printf("[%d] %d\n", job_count, pid);
+}
+
+// Collect every background child that has finished (no zombies left behind).
+// WNOHANG = "do not wait": waitpid returns 0 at once if nobody has finished.
+void reap_jobs(void) {
+    int status;
+    pid_t pid;
+
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        for (int i = 0; i < job_count; i++) {
+            if (jobs[i].pid == pid) {
+                printf("[Done] %d  %s\n", pid, jobs[i].cmd);
+                // Remove entry i by shifting the later entries up
+                for (int j = i; j < job_count - 1; j++) {
+                    jobs[j] = jobs[j + 1];
+                }
+                job_count--;
+                break;
+            }
+        }
+    }
+}
+
+void print_jobs(void) {
+    reap_jobs();   // drop anything that has just finished
+    if (job_count == 0) {
+        printf("No background jobs.\n");
+        return;
+    }
+    for (int i = 0; i < job_count; i++) {
+        printf("[%d] %d  Running  %s\n", i + 1, jobs[i].pid, jobs[i].cmd);
+    }
 }

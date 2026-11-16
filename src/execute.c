@@ -50,8 +50,9 @@ static void run_child(char** args) {
 }
 
 // Runs one command, or several joined by pipes: cmd1 | cmd2 | cmd3
+// background = 1 means the command ended with & : do not wait for it.
 // Returns the exit status of the last command (0 = success).
-int execute(char** arglist) {
+int execute(char** arglist, int background) {
     // Find where each command of the pipeline starts
     int starts[MAXARGS + 1];
     int ncmds = 0;
@@ -103,6 +104,15 @@ int execute(char** arglist) {
             prev_read = fd[0];   // the next command will read from here
         }
         pids[c] = pid;
+    }
+
+    if (background) {
+        // Do NOT wait. Just note the PIDs and go straight back to the prompt;
+        // reap_jobs() will collect these children when they finish.
+        for (int c = 0; c < ncmds; c++) {
+            add_job(pids[c], arglist + starts[c]);
+        }
+        return 0;
     }
 
     // Wait for every child; the status kept is that of the last command
