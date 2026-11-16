@@ -1,39 +1,58 @@
 #include "shell.h"
 
+// True for characters that are a token all by themselves
+static int is_operator(char c) {
+    return c == '<' || c == '>' || c == '|';
+}
+
+// Splits a command line into tokens (words).
+//   ls -l>out.txt     ->  "ls" "-l" ">" "out.txt"
+//   grep "a b" f.txt  ->  "grep" "a b" "f.txt"     (quotes group, then vanish)
+// Returns a NULL-terminated array, or NULL if the line has no tokens.
 char** tokenize(char* cmdline) {
-    // Edge case: empty command line
-    if (cmdline == NULL || cmdline[0] == '\0' || cmdline[0] == '\n') {
+    if (cmdline == NULL) {
         return NULL;
     }
 
-    char** arglist = (char**)malloc(sizeof(char*) * (MAXARGS + 1));
-    for (int i = 0; i < MAXARGS + 1; i++) {
-        arglist[i] = (char*)malloc(sizeof(char) * ARGLEN);
-        bzero(arglist[i], ARGLEN);
-    }
-
+    char** arglist = (char**) malloc(sizeof(char*) * (MAXARGS + 1));
+    char* buf = (char*) malloc(strlen(cmdline) + 1);   // one token can never be longer than the line
     char* cp = cmdline;
-    char* start;
-    int len;
     int argnum = 0;
 
     while (*cp != '\0' && argnum < MAXARGS) {
-        while (*cp == ' ' || *cp == '\t') cp++; // Skip leading whitespace
-        
-        if (*cp == '\0') break; // Line was only whitespace
+        while (*cp == ' ' || *cp == '\t') cp++;   // skip whitespace between tokens
+        if (*cp == '\0') break;
 
-        start = cp;
-        len = 1;
-        while (*++cp != '\0' && !(*cp == ' ' || *cp == '\t')) {
-            len++;
+        // <, > and | are tokens on their own, even with no spaces around them
+        if (is_operator(*cp)) {
+            buf[0] = *cp++;
+            buf[1] = '\0';
+            arglist[argnum++] = strdup(buf);
+            continue;
         }
-        strncpy(arglist[argnum], start, len);
-        arglist[argnum][len] = '\0';
-        argnum++;
+
+        // An ordinary word: runs until whitespace or an operator
+        int len = 0;
+        while (*cp != '\0' && *cp != ' ' && *cp != '\t' && !is_operator(*cp)) {
+            if (*cp == '"' || *cp == '\'') {
+                // Quoted part: copy everything up to the closing quote,
+                // spaces included, but leave out the quote marks themselves
+                char quote = *cp++;
+                while (*cp != '\0' && *cp != quote) {
+                    buf[len++] = *cp++;
+                }
+                if (*cp == quote) cp++;
+            } else {
+                buf[len++] = *cp++;
+            }
+        }
+        buf[len] = '\0';
+        arglist[argnum++] = strdup(buf);
     }
 
-    if (argnum == 0) { // No arguments were parsed
-        for(int i = 0; i < MAXARGS + 1; i++) free(arglist[i]);
+    free(buf);
+
+    if (argnum == 0) {   // blank line
         free(arglist);
         return NULL;
     }
