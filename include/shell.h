@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <readline/readline.h>
@@ -18,6 +19,7 @@
 #define PROMPT "FCIT> "
 #define HISTORY_SIZE 20
 #define MAX_JOBS 32
+#define MAX_BLOCK 32
 
 // Function prototypes
 char** tokenize(char* cmdline);
@@ -30,5 +32,10 @@ char** shell_completion(const char* text, int start, int end);
 void add_job(pid_t pid, char** arglist);
 void reap_jobs(void);
 void print_jobs(void);
+void set_var(const char* name, const char* value);
+char* get_var(const char* name);
+void print_vars(void);
+int handle_assignment(char** arglist);
+void expand_variables(char** arglist);
 
 #endif // SHELL_H

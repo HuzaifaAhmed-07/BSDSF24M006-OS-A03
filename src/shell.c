@@ -96,6 +96,11 @@ int handle_builtin(char** arglist) {
         return 1;
     }
 
+    if (strcmp(arglist[0], "set") == 0) {
+        print_vars();
+        return 1;
+    }
+
     if (strcmp(arglist[0], "jobs") == 0) {
         print_jobs();
         return 1;
@@ -137,7 +142,7 @@ void print_history(void) {
 
 /* ---------------- Tab completion (GNU Readline) ---------------- */
 
-static char* builtin_names[] = { "cd", "exit", "help", "history", "jobs", NULL };
+static char* builtin_names[] = { "cd", "exit", "help", "history", "jobs", "set", NULL };
 
 // Readline calls this again and again; each call must return ONE match,
 // and NULL when there are no more. state == 0 means "new TAB press, start over".
@@ -258,5 +263,104 @@ void print_jobs(void) {
     }
     for (int i = 0; i < job_count; i++) {
         printf("[%d] %d  Running  %s\n", i + 1, jobs[i].pid, jobs[i].cmd);
+    }
+}
+
+/* ---------------- Shell variables ---------------- */
+
+// One variable = one node of a singly linked list
+typedef struct var {
+    char* name;
+    char* value;
+    struct var* next;
+} var_t;
+
+static var_t* var_list = NULL;   // head of the list (empty at start)
+
+// Create the variable, or change its value if it already exists
+void set_var(const char* name, const char* value) {
+    for (var_t* v = var_list; v != NULL; v = v->next) {
+        if (strcmp(v->name, name) == 0) {
+            free(v->value);              // throw away the old value
+            v->value = strdup(value);
+            return;
+        }
+    }
+
+    // Not found: make a new node and put it at the front of the list
+    var_t* v = (var_t*) malloc(sizeof(var_t));
+    v->name = strdup(name);
+    v->value = strdup(value);
+    v->next = var_list;
+    var_list = v;
+}
+
+// Returns the value of a variable, or NULL if there is no such variable
+char* get_var(const char* name) {
+    for (var_t* v = var_list; v != NULL; v = v->next) {
+        if (strcmp(v->name, name) == 0) {
+            return v->value;
+        }
+    }
+    return NULL;
+}
+
+// The "set" built-in: print every variable as NAME=value
+void print_vars(void) {
+    for (var_t* v = var_list; v != NULL; v = v->next) {
+        printf("%s=%s\n", v->name, v->value);
+    }
+}
+
+// If the command is a single word of the form NAME=value, store the
+// variable and return 1. Otherwise return 0 and do nothing.
+int handle_assignment(char** arglist) {
+    if (arglist[1] != NULL) {
+        return 0;   // more than one word, so it is an ordinary command
+    }
+
+    char* eq = strchr(arglist[0], '=');   // points at the '=' (or NULL)
+    if (eq == NULL || eq == arglist[0]) {
+        return 0;   // no '=' at all, or nothing before it
+    }
+
+    // The name may use letters, digits and _ and must not start with a digit
+    if (isdigit((unsigned char) arglist[0][0])) {
+        return 0;
+    }
+    for (char* p = arglist[0]; p < eq; p++) {
+        if (!isalnum((unsigned char) *p) && *p != '_') {
+            return 0;
+        }
+    }
+
+    *eq = '\0';                      // cut "NAME=value" into "NAME" and "value"
+    set_var(arglist[0], eq + 1);
+    *eq = '=';                       // put the word back as it was
+    return 1;
+}
+
+// Replace every argument that starts with $ by the value of that variable.
+// Runs after tokenizing and before executing.
+void expand_variables(char** arglist) {
+    for (int i = 0; arglist[i] != NULL; i++) {
+        if (arglist[i][0] != '$' || arglist[i][1] == '\0') {
+            continue;   // not a variable (a lone "$" is left alone)
+        }
+
+        char* name = arglist[i] + 1;      // skip the '$'
+        char* value = get_var(name);
+        if (value == NULL) {
+            value = getenv(name);         // fall back to the environment: $HOME, $PATH ...
+        }
+        if (value == NULL) {
+            value = "";                   // unknown variable becomes empty text
+        }
+
+        // The old string may be too small for the value, so allocate a
+        // new one of the right size and free the old one
+        char* expanded = strdup(value);
+        free(arglist[i]);
+        arglist[i] = expanded;
     }
 }

@@ -18,10 +18,15 @@ int run_command(char* cmd) {
         arglist[n - 1] = NULL;
     }
 
+    // Replace $NAME words by their values before anything is run
+    expand_variables(arglist);
+
     int status = 0;
     if (arglist[0] != NULL) {
-        // Built-ins run inside the shell itself; only fork for external commands
-        if (handle_builtin(arglist) == 0) {
+        if (handle_assignment(arglist)) {
+            // NAME=value : stored inside the shell, nothing to run
+        } else if (handle_builtin(arglist) == 0) {
+            // Built-ins run inside the shell itself; only fork for external commands
             status = execute(arglist, background);
         }
     }
@@ -57,6 +62,86 @@ void run_line(char* line) {
     }
 }
 
+// Removes spaces and tabs from both ends of s. The end is cut off in place;
+// the return value points at the first character that is not a space.
+char* trim(char* s) {
+    while (*s == ' ' || *s == '\t') s++;
+    char* end = s + strlen(s);
+    while (end > s && (end[-1] == ' ' || end[-1] == '\t')) end--;
+    *end = '\0';
+    return s;
+}
+
+// Does the line begin with the word "if"?
+int is_if(const char* line) {
+    return strncmp(line, "if", 2) == 0 && (line[2] == ' ' || line[2] == '\t');
+}
+
+// Handles:   if <command>
+//            then
+//                <commands>
+//            else              (the else part is optional)
+//                <commands>
+//            fi
+// if_line is the first line ("if <command>"). The rest is read here.
+void run_if_block(char* if_line) {
+    char* then_lines[MAX_BLOCK];   // commands between then and else/fi
+    char* else_lines[MAX_BLOCK];   // commands between else and fi
+    int then_count = 0;
+    int else_count = 0;
+
+    int state = 0;      // 0 = waiting for "then", 1 = in then-block, 2 = in else-block
+    int finished = 0;   // becomes 1 when "fi" is read
+    int ok = 1;         // becomes 0 on a syntax error
+
+    // Special mode: keep reading lines (with a "> " prompt) until "fi"
+    while (ok && !finished) {
+        char* raw = readline("> ");
+        if (raw == NULL) {   // Ctrl+D in the middle of the block
+            printf("\nsyntax error: reached end of input, expected 'fi'\n");
+            ok = 0;
+            break;
+        }
+        char* line = trim(raw);
+
+        if (state == 0) {
+            if (strcmp(line, "then") == 0) {
+                state = 1;
+            } else if (line[0] != '\0') {
+                printf("syntax error: expected 'then' after if\n");
+                ok = 0;
+            }
+        } else if (strcmp(line, "fi") == 0) {
+            finished = 1;
+        } else if (strcmp(line, "else") == 0 && state == 1) {
+            state = 2;
+        } else if (line[0] != '\0') {
+            // An ordinary command: save it in the block we are in
+            if (state == 1 && then_count < MAX_BLOCK) {
+                then_lines[then_count++] = strdup(line);
+            } else if (state == 2 && else_count < MAX_BLOCK) {
+                else_lines[else_count++] = strdup(line);
+            }
+        }
+        free(raw);
+    }
+
+    if (ok) {
+        // Run the condition: everything after the word "if".
+        // Exit status 0 means success, which counts as "true".
+        int status = run_command(trim(if_line + 2));
+
+        if (status == 0) {
+            for (int i = 0; i < then_count; i++) run_line(then_lines[i]);
+        } else {
+            for (int i = 0; i < else_count; i++) run_line(else_lines[i]);
+        }
+    }
+
+    for (int i = 0; i < then_count; i++) free(then_lines[i]);
+    for (int i = 0; i < else_count; i++) free(else_lines[i]);
+}
+
 int main() {
     char* cmdline;
 
@@ -74,30 +159,37 @@ int main() {
             break;
         }
 
+        char* line = trim(cmdline);   // ignore spaces at the start and end
+
         // Nothing typed: do not store it, just show the prompt again
-        if (cmdline[0] == '\0') {
+        if (line[0] == '\0') {
             free(cmdline);
             continue;
         }
 
         // !n : swap the line for command number n from history.
         // This must happen BEFORE tokenizing and BEFORE saving to history.
-        if (cmdline[0] == '!') {
-            char* old = get_history_cmd(atoi(cmdline + 1));
+        if (line[0] == '!') {
+            char* old = get_history_cmd(atoi(line + 1));
             if (old == NULL) {
-                printf("%s: no such command in history\n", cmdline);
+                printf("%s: no such command in history\n", line);
                 free(cmdline);
                 continue;
             }
             free(cmdline);
             cmdline = strdup(old);
-            printf("%s\n", cmdline);    // show what is about to run
+            line = cmdline;
+            printf("%s\n", line);    // show what is about to run
         }
 
-        add_to_history(cmdline);   // our own list: 'history' and !n
-        add_history(cmdline);      // Readline's list: Up/Down arrow keys
+        add_to_history(line);   // our own list: 'history' and !n
+        add_history(line);      // Readline's list: Up/Down arrow keys
 
-        run_line(cmdline);
+        if (is_if(line)) {
+            run_if_block(line);   // reads the rest of the block itself
+        } else {
+            run_line(line);
+        }
         free(cmdline);
     }
 
