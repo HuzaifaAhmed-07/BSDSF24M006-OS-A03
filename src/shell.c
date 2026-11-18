@@ -88,6 +88,8 @@ int handle_builtin(char** arglist) {
         printf("  help            Show this help message\n");
         printf("  history         Show recent commands (use !n to re-run number n)\n");
         printf("  jobs            List background jobs\n");
+        printf("  set             List all shell variables (assign with NAME=value)\n");
+
         return 1;
     }
 
